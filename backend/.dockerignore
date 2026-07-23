@@ -1,0 +1,28 @@
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.env
+*.db
+.git
+.gitignore
+vector_store/
+README.md
+**/.DS_Store
+# 旧 app/data 目录（providers.json 已迁移到项目根 data/）
+app/data/
+
+# 知识库文件 — 仅保留索引，PDF 不入镜像
+knowledge_base/vector_store/
+knowledge_base/textbooks/
+knowledge_base/questions/
+knowledge_base/materials/*.pdf
+# 大文件
+*.pdf
+*.docx
+*.pptx
+# Docker 自身
+Dockerfile
+.dockerignore
+docker-compose*

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edu-TA 智教星 - AI 教学助教系统</title>
+    <style>
+      /* 防止 JS 加载前白屏 */
+      #root { min-height: 100vh; background: #F0F4FF; }
+      #root::before {
+        content: 'Edu-TA 智教星 加载中...';
+        position: fixed; inset: 0; display: flex;
+        align-items: center; justify-content: center;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 16px; color: #6B7280;
+        background: linear-gradient(135deg, #F0F4FF, #E8EEF8);
+        z-index: 9999;
+        transition: opacity 0.3s;
+      }
+      #root:not(:empty)::before { opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

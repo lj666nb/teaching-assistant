@@ -1,0 +1,86 @@
+# ─── 学科助教系统 Edu-TA  —  Docker Compose ─────────────────
+# 一键启动：
+#   docker-compose up -d
+# 访问 http://localhost:8080
+#
+# 无需预配置 API Key，启动后访问 http://localhost:8080 在网页中配置
+# 如需通过 .env 设置默认值：cp backend/.env.example .env 并编辑
+#
+# 停止：
+#   docker-compose down
+#
+# 停止并删除数据卷：
+#   docker-compose down -v
+
+services:
+  # ── 后端服务 (FastAPI) ──────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: edu-ta-backend
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      # 时区
+      - TZ=Asia/Shanghai
+      # 数据目录（映射到持久化卷 edu-ta-data）
+      - DATA_DIR=/app/data
+      # LLM 配置（通过 .env 文件传入，也可在浏览器 UI 中配置）
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-gpt-4o-mini}
+      - EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME:-BAAI/bge-small-zh-v1.5}
+      - VECTOR_DB_PATH=/app/knowledge_base/vector_store
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/app.db
+    volumes:
+      # 持久化向量数据库
+      - edu-ta-vector-store:/app/knowledge_base/vector_store
+      # 持久化 SQLite 数据库
+      - edu-ta-data:/app/data
+      # 持久化上传的教材
+      - edu-ta-textbooks:/app/knowledge_base/textbooks
+      # 持久化教学资料
+      - edu-ta-materials:/app/knowledge_base/materials
+    ports:
+      - "127.0.0.1:8002:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - edu-ta-network
+
+  # ── 前端服务 (Nginx) ────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: edu-ta-frontend
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    stop_grace_period: 10s
+    networks:
+      - edu-ta-network
+
+networks:
+  edu-ta-network:
+    driver: bridge
+
+volumes:
+  edu-ta-vector-store:
+    name: edu-ta-vector-store
+  edu-ta-data:
+    name: edu-ta-data
+  edu-ta-textbooks:
+    name: edu-ta-textbooks
+  edu-ta-materials:
+    name: edu-ta-materials

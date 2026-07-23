@@ -1,0 +1,42 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.vite/
+.DS_Store
+*.log
+*.tsbuildinfo
+.claude/
+.playwright-mcp/
+docker-compose.override.yml
+backend/data/
+backend/knowledge_base/vector_store/
+backend/knowledge_base/materials/*.pdf
+backend/knowledge_base/textbooks/
+backend/knowledge_base/questions/
+
+# Database files (may contain cached config)
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# Import / utility scripts
+scripts/
+
+# Frontend build artifacts
+frontend/vite.config.js
+frontend/vite.config.d.ts
+frontend/dist/
