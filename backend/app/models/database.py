@@ -3,23 +3,36 @@
 
 提供课程、教案、作业、出题、学情等实体的持久化存储。
 所有 AI 生成结果存入数据库，容器重启不丢失。
+
+支持 PostgreSQL（生产 / 多项目互通）和 SQLite（本地开发）。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, create_engine
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, create_engine, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
 
-# 使用同步 SQLite（不走 aiosqlite）
-SYNC_DB_URL = settings.database_url.replace("sqlite+aiosqlite://", "sqlite://")
+_log = logging.getLogger(__name__)
+
+# ── 数据库引擎 ──────────────────────────────────────────────
+# 根据 database_url 自动适配 PostgreSQL 或 SQLite
+_is_sqlite = "sqlite" in settings.database_url
+
+_connect_args: dict = {}
+if _is_sqlite:
+    _connect_args = {"check_same_thread": False, "timeout": 30}
+
 engine = create_engine(
-    SYNC_DB_URL,
-    connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in SYNC_DB_URL else {},
+    settings.database_url,
+    connect_args=_connect_args,
+    pool_size=5 if not _is_sqlite else 0,
+    max_overflow=10 if not _is_sqlite else 0,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -34,33 +47,47 @@ def get_db():
         db.close()
 
 
+def _ensure_columns(db_table, columns: dict[str, str]):
+    """通用补列逻辑 — 兼容 PostgreSQL 和 SQLite。"""
+    inspector = inspect(engine)
+    try:
+        existing_cols = {c["name"] for c in inspector.get_columns(db_table)}
+    except Exception:
+        return  # 表还不存在，create_all 会处理
+
+    for col_name, col_type_sql in columns.items():
+        if col_name not in existing_cols:
+            try:
+                with engine.connect() as conn:
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE {db_table} ADD COLUMN {col_name} {col_type_sql}"
+                    )
+                    conn.commit()
+                _log.info(f"迁移: 添加列 {db_table}.{col_name}")
+            except Exception as e:
+                _log.warning(f"迁移跳过 {db_table}.{col_name}: {e}")
+
+
 def init_db():
     """初始化数据库表，并对已有表执行轻量级迁移。"""
     Base.metadata.create_all(bind=engine)
 
-    # ── SQLite 轻量迁移：为已有 homework_grades 表添加新列 ──
-    if "sqlite" in SYNC_DB_URL:
-        import logging
-        _log = logging.getLogger(__name__)
-        with engine.connect() as conn:
-            existing = {row[1] for row in conn.exec_driver_sql(
-                "PRAGMA table_info('homework_grades')"
-            ).fetchall()}
-            migrations = [
-                ("source_file", "TEXT DEFAULT ''"),
-                ("batch_id", "TEXT DEFAULT ''"),
-                ("is_archived", "BOOLEAN DEFAULT 0"),
-            ]
-            for col_name, col_def in migrations:
-                if col_name not in existing:
-                    try:
-                        conn.exec_driver_sql(
-                            f"ALTER TABLE homework_grades ADD COLUMN {col_name} {col_def}"
-                        )
-                        conn.commit()
-                        _log.info(f"迁移: 添加列 homework_grades.{col_name}")
-                    except Exception:
-                        pass
+    # ── 轻量迁移：补列（兼容 SQLite 旧库升级 & PostgreSQL 新部署） ──
+    _ensure_columns("homework_grades", {
+        "source_file": "TEXT DEFAULT ''",
+        "batch_id": "TEXT DEFAULT ''",
+        "is_archived": "BOOLEAN DEFAULT FALSE",
+        "project_id": "TEXT DEFAULT 'ta-project'",
+    })
+    _ensure_columns("insight_reports", {
+        "project_id": "TEXT DEFAULT 'ta-project'",
+    })
+    _ensure_columns("materials", {
+        "project_id": "TEXT DEFAULT 'ta-project'",
+    })
+    _ensure_columns("teaching_aux", {
+        "project_id": "TEXT DEFAULT 'ta-project'",
+    })
 
 
 # ═══════════════════════════════════════════════════════════
@@ -118,9 +145,10 @@ class HomeworkGrade(Base):
     suggestions = Column(Text, default="[]")
     knowledge_points = Column(Text, default="[]")
     detailed_analysis = Column(Text, default="")
-    source_file = Column(Text, default="")   # 来源文件名
-    batch_id = Column(Text, default="")     # 同一批次上传的标识
-    is_archived = Column(Boolean, default=False)  # 是否已手动归档至教学台账
+    source_file = Column(Text, default="")
+    batch_id = Column(Text, default="")
+    is_archived = Column(Boolean, default=False)
+    project_id = Column(Text, default="ta-project", index=True)  # 数据来源项目
     created_at = Column(DateTime, default=datetime.now)
 
     def to_dict(self) -> dict:
@@ -144,6 +172,7 @@ class HomeworkGrade(Base):
             "source_file": self.source_file,
             "batch_id": self.batch_id,
             "is_archived": self.is_archived,
+            "project_id": self.project_id,
             "_source": "seed" if self.id.startswith("seed_") else "user",
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
@@ -191,6 +220,7 @@ class Material(Base):
     text_preview = Column(Text, default="")
     text_content = Column(Text, default="")
     file_path = Column(Text, default="")
+    project_id = Column(Text, default="ta-project", index=True)  # 数据来源项目
     created_at = Column(DateTime, default=datetime.now)
 
     def to_dict(self) -> dict:
@@ -203,6 +233,7 @@ class Material(Base):
             "size_display": self.size_display,
             "pages": self.pages,
             "text_preview": self.text_preview,
+            "project_id": self.project_id,
             "_source": "seed" if self.id.startswith("seed_") else "user",
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
@@ -265,6 +296,7 @@ class InsightReport(Base):
     course_name = Column(Text, nullable=False)
     report_type = Column(Text, default="individual")
     report_json = Column(Text, nullable=False)
+    project_id = Column(Text, default="ta-project", index=True)  # 数据来源项目
     created_at = Column(DateTime, default=datetime.now)
 
     def to_dict(self) -> dict:
@@ -274,6 +306,7 @@ class InsightReport(Base):
             "course_name": self.course_name,
             "report_type": self.report_type,
             "report": json.loads(self.report_json) if self.report_json else {},
+            "project_id": self.project_id,
             "_source": "seed" if self.id.startswith("seed_") else "user",
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
@@ -292,6 +325,7 @@ class TeachingAux(Base):
     chapter = Column(Text, nullable=False)
     aux_type = Column(Text, nullable=False)  # difficulty | classroom | ppt | variant
     content_json = Column(Text, nullable=False)
+    project_id = Column(Text, default="ta-project", index=True)  # 数据来源项目
     created_at = Column(DateTime, default=datetime.now)
 
     def to_dict(self) -> dict:
@@ -301,6 +335,7 @@ class TeachingAux(Base):
             "chapter": self.chapter,
             "aux_type": self.aux_type,
             "content": json.loads(self.content_json) if self.content_json else {},
+            "project_id": self.project_id,
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
 
@@ -418,6 +453,29 @@ class AgentWorkflow(Base):
             "final_output": json.loads(self.final_output) if self.final_output else {},
             "created_at": self.created_at.isoformat() if self.created_at else "",
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+# ═══════════════════════════════════════════════════════════
+# 9. 项目互通注册
+# ═══════════════════════════════════════════════════════════
+
+class ProjectRegistry(Base):
+    """多项目互通注册表 — 管理接入共享数据库的所有项目。"""
+    __tablename__ = "project_registry"
+
+    id = Column(Text, primary_key=True)             # "ta-project" / "student-project"
+    name = Column(Text, nullable=False)              # "助教系统" / "助学系统"
+    token_hash = Column(Text, nullable=False)        # SHA256(project_token)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else "",
         }
 
 

@@ -1,0 +1,68 @@
+# ─── 客户端模式 — 连接远程共享数据库 ─────────────────────────
+# 适用于助教端 / 助学端设备，无需本地 PostgreSQL。
+# 后端直连服务器上的 PostgreSQL。
+#
+# 启动前请先修改环境变量 DATABASE_URL 为服务器地址。
+# 启动：
+#   docker compose -f docker-compose.client.yml up -d
+#
+# 停止：
+#   docker compose -f docker-compose.client.yml down
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: edu-ta-backend
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      - TZ=Asia/Shanghai
+      - DATA_DIR=/app/data
+      # ⚠️ 修改为服务器实际 IP 和密码
+      - DATABASE_URL=postgresql+psycopg2://edu_admin:${DB_PASSWORD:-changeme}@${DB_HOST:-192.168.1.100}:5432/edu_ta
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-gpt-4o-mini}
+      - EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME:-BAAI/bge-small-zh-v1.5}
+      - VECTOR_DB_PATH=/app/knowledge_base/vector_store
+      # 项目标识（助教端填 ta-project，助学端填 student-project）
+      - PROJECT_ID=${PROJECT_ID:-ta-project}
+      - PROJECT_TOKEN=${PROJECT_TOKEN:-}
+    volumes:
+      - edu-ta-vector-store:/app/knowledge_base/vector_store
+      - edu-ta-textbooks:/app/knowledge_base/textbooks
+      - edu-ta-materials:/app/knowledge_base/materials
+    ports:
+      - "127.0.0.1:8002:8000"
+    networks:
+      - edu-ta-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: edu-ta-frontend
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    stop_grace_period: 10s
+    networks:
+      - edu-ta-network
+
+networks:
+  edu-ta-network:
+    driver: bridge
+
+volumes:
+  edu-ta-vector-store:
+    name: edu-ta-vector-store
+  edu-ta-textbooks:
+    name: edu-ta-textbooks
+  edu-ta-materials:
+    name: edu-ta-materials

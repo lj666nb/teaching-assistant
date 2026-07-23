@@ -1,0 +1,43 @@
+# ─── 学科助教系统 Edu-TA — 共享数据库服务器部署 ─────────────
+# 部署到独立服务器设备上，供助教端和助学端共同连接。
+#
+# 启动：
+#   docker compose -f docker-compose.server.yml up -d
+#
+# 停止：
+#   docker compose -f docker-compose.server.yml down
+#
+# 停止并清空数据：
+#   docker compose -f docker-compose.server.yml down -v
+#
+# ⚠️ 安全提醒：
+#   生产环境务必修改 DB_PASSWORD，并通过防火墙限制 5432 端口
+#   仅允许助教端和助学端的出口 IP 访问。
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: edu-shared-db
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      - POSTGRES_DB=edu_ta
+      - POSTGRES_USER=edu_admin
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-edu_ta_pass_2024}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 首次启动自动执行初始化脚本
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      # 生产环境建议改为仅监听内网或配置防火墙白名单
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edu_admin -d edu_ta"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  pgdata:
+    name: edu-shared-pgdata
