@@ -20,8 +20,8 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - DATA_DIR=/app/data
-      # ⚠️ 修改为服务器实际 IP 和密码
-      - DATABASE_URL=postgresql+psycopg2://edu_admin:${DB_PASSWORD:-changeme}@${DB_HOST:-192.168.1.100}:5432/edu_ta
+      # 数据库 — 云端 PostgreSQL（与项目11共用 tiaozhanbei）
+      - DATABASE_URL=postgresql+psycopg2://app_user:${DB_PASSWORD:-123456}@${DB_HOST:-113.45.66.152}:5432/tiaozhanbei
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
       - LLM_MODEL_NAME=${LLM_MODEL_NAME:-gpt-4o-mini}

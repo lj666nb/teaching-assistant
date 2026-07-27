@@ -5,15 +5,21 @@
 所有 AI 生成结果存入数据库，容器重启不丢失。
 
 支持 PostgreSQL（生产 / 多项目互通）和 SQLite（本地开发）。
+云端 PostgreSQL 与项目11共用 tiaozhanbei 数据库。
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import uuid as _uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, create_engine, inspect
+from sqlalchemy import (
+    Boolean, Column, DateTime, Float, Integer, String, Text,
+    create_engine, inspect, text as sa_text,
+)
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
@@ -68,11 +74,24 @@ def _ensure_columns(db_table, columns: dict[str, str]):
                 _log.warning(f"迁移跳过 {db_table}.{col_name}: {e}")
 
 
+def _uuid() -> str:
+    """生成 UUID 字符串，兼容所有数据库。"""
+    return str(_uuid.uuid4())
+
+
+def _now() -> datetime:
+    return datetime.now()
+
+
 def init_db():
     """初始化数据库表，并对已有表执行轻量级迁移。"""
+    # ── 迁移: 删除旧 TEXT-id 表，重新用 UUID-id 创建 ──
+    # 仅在教学表全部为空时执行（安全保护）
+    _migrate_to_uuid_if_needed()
+
     Base.metadata.create_all(bind=engine)
 
-    # ── 轻量迁移：补列（兼容 SQLite 旧库升级 & PostgreSQL 新部署） ──
+    # ── 轻量迁移：补列 ──
     _ensure_columns("homework_grades", {
         "source_file": "TEXT DEFAULT ''",
         "batch_id": "TEXT DEFAULT ''",
@@ -81,6 +100,7 @@ def init_db():
     })
     _ensure_columns("insight_reports", {
         "project_id": "TEXT DEFAULT 'ta-project'",
+        "student_id": "TEXT DEFAULT ''",
     })
     _ensure_columns("materials", {
         "project_id": "TEXT DEFAULT 'ta-project'",
@@ -88,6 +108,65 @@ def init_db():
     _ensure_columns("teaching_aux", {
         "project_id": "TEXT DEFAULT 'ta-project'",
     })
+
+
+def _migrate_to_uuid_if_needed():
+    """如果数据库中 teaching-assistant 表的 id 列类型与 SQLAlchemy 模型不匹配
+    （如 PostgreSQL UUID 类型），且表为空，则删除后重建。"""
+    if _is_sqlite:
+        return  # SQLite 无需迁移
+
+    # SQLAlchemy String(36) → PostgreSQL character varying(36)
+    ta_tables = [
+        "lesson_plans", "homework_grades", "exercise_batches", "materials",
+        "questions", "insight_reports", "teaching_aux", "agent_workflows",
+        "llm_call_logs", "audit_logs", "plan_snapshots",
+    ]
+
+    with engine.connect() as conn:
+        for table_name in ta_tables:
+            try:
+                # 检查表是否存在
+                result = conn.exec_driver_sql(
+                    f"SELECT EXISTS (SELECT FROM information_schema.tables "
+                    f"WHERE table_name = '{table_name}')"
+                )
+                exists = result.fetchone()[0]
+                if not exists:
+                    continue
+
+                # 检查是否为空表
+                count = conn.exec_driver_sql(
+                    f"SELECT COUNT(*) FROM {table_name}"
+                ).fetchone()[0]
+                if count > 0:
+                    _log.info(f"迁移: {table_name} 有 {count} 条数据，跳过重建")
+                    continue
+
+                # 检查 id 列类型 — 如果不是 character varying(36) 则重建
+                col_info = conn.exec_driver_sql(
+                    f"SELECT data_type, character_maximum_length "
+                    f"FROM information_schema.columns "
+                    f"WHERE table_name = '{table_name}' AND column_name = 'id'"
+                ).fetchone()
+                if col_info is None:
+                    continue
+                col_type, col_len = col_info[0], col_info[1]
+                # 需要重建: UUID 类型, TEXT 类型, 或 varchar 但不是 36 位
+                needs_rebuild = (
+                    col_type in ("uuid", "text") or
+                    (col_type == "character varying" and col_len != 36)
+                )
+                if needs_rebuild:
+                    conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table_name} CASCADE")
+                    conn.commit()
+                    _log.info(
+                        f"迁移: 删除 {table_name}({col_type}), "
+                        f"将以 character varying(36) 重建"
+                    )
+            except Exception as e:
+                _log.warning(f"迁移检查 {table_name}: {e}")
+                conn.rollback()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -98,14 +177,15 @@ class LessonPlan(Base):
     """教案（完整生成结果持久化）。"""
     __tablename__ = "lesson_plans"
 
-    id = Column(Text, primary_key=True)
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(Integer, nullable=True, default=1)
     course_name = Column(Text, nullable=False, index=True)
-    chapter = Column(Text, nullable=False)
+    chapter = Column(Text, nullable=True, default="")
     total_hours = Column(Integer, default=2)
     additional_requirements = Column(Text, default="")
     plan_data = Column(Text, nullable=False)  # JSON 序列化的完整教案
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
 
     def to_dict(self) -> dict:
         return {
@@ -114,7 +194,7 @@ class LessonPlan(Base):
             "chapter": self.chapter,
             "total_hours": self.total_hours,
             "additional_requirements": self.additional_requirements,
-            "plan_data": json.loads(self.plan_data) if self.plan_data else {},
+            "plan_data": json.loads(self.plan_data) if isinstance(self.plan_data, str) else self.plan_data,
             "_source": "ai",
             "created_at": self.created_at.isoformat() if self.created_at else "",
             "updated_at": self.updated_at.isoformat() if self.updated_at else "",
@@ -129,8 +209,9 @@ class HomeworkGrade(Base):
     """作业批改结果。"""
     __tablename__ = "homework_grades"
 
-    id = Column(Text, primary_key=True)
-    student_name = Column(Text, nullable=False)
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(Integer, nullable=True, default=1)
+    student_name = Column(Text, nullable=True, default="")
     course_name = Column(Text, nullable=False, index=True)
     chapter = Column(Text, default="")
     question_text = Column(Text, default="")
@@ -148,10 +229,18 @@ class HomeworkGrade(Base):
     source_file = Column(Text, default="")
     batch_id = Column(Text, default="")
     is_archived = Column(Boolean, default=False)
-    project_id = Column(Text, default="ta-project", index=True)  # 数据来源项目
-    created_at = Column(DateTime, default=datetime.now)
+    project_id = Column(Text, default="ta-project", index=True)
+    created_at = Column(DateTime, default=_now)
 
     def to_dict(self) -> dict:
+        def _json_parse(val):
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    return []
+            return val or []
+
         return {
             "id": self.id,
             "student_name": self.student_name,
@@ -164,16 +253,16 @@ class HomeworkGrade(Base):
             "score": self.score,
             "percentage": self.percentage,
             "feedback": self.feedback,
-            "strengths": json.loads(self.strengths) if self.strengths else [],
-            "weaknesses": json.loads(self.weaknesses) if self.weaknesses else [],
-            "suggestions": json.loads(self.suggestions) if self.suggestions else [],
-            "knowledge_points": json.loads(self.knowledge_points) if self.knowledge_points else [],
+            "strengths": _json_parse(self.strengths),
+            "weaknesses": _json_parse(self.weaknesses),
+            "suggestions": _json_parse(self.suggestions),
+            "knowledge_points": _json_parse(self.knowledge_points),
             "detailed_analysis": self.detailed_analysis,
             "source_file": self.source_file,
             "batch_id": self.batch_id,
             "is_archived": self.is_archived,
             "project_id": self.project_id,
-            "_source": "seed" if self.id.startswith("seed_") else "user",
+            "_source": "seed" if (self.id or "").startswith("seed_") else "user",
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
 
@@ -182,13 +271,14 @@ class ExerciseBatch(Base):
     """出题批次（一次生成的一组题目）。"""
     __tablename__ = "exercise_batches"
 
-    id = Column(Text, primary_key=True)
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(Integer, nullable=True, default=1)
     course_name = Column(Text, nullable=False, index=True)
     chapter = Column(Text, default="")
     difficulty = Column(Text, default="中等")
     total = Column(Integer, default=0)
-    exercises_json = Column(Text, nullable=False)  # 完整题目列表
-    created_at = Column(DateTime, default=datetime.now)
+    exercises_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_now)
 
     def to_dict(self) -> dict:
         return {
@@ -197,7 +287,7 @@ class ExerciseBatch(Base):
             "chapter": self.chapter,
             "difficulty": self.difficulty,
             "total": self.total,
-            "exercises": json.loads(self.exercises_json) if self.exercises_json else [],
+            "exercises": json.loads(self.exercises_json) if isinstance(self.exercises_json, str) else self.exercises_json,
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
 
@@ -210,7 +300,8 @@ class Material(Base):
     """教学资料（上传的文件元数据）。"""
     __tablename__ = "materials"
 
-    id = Column(Text, primary_key=True)
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(Integer, nullable=True, default=1)
     filename = Column(Text, nullable=False)
     course = Column(Text, default="未分类", index=True)
     chapter = Column(Text, default="")
@@ -220,8 +311,8 @@ class Material(Base):
     text_preview = Column(Text, default="")
     text_content = Column(Text, default="")
     file_path = Column(Text, default="")
-    project_id = Column(Text, default="ta-project", index=True)  # 数据来源项目
-    created_at = Column(DateTime, default=datetime.now)
+    project_id = Column(Text, default="ta-project", index=True)
+    created_at = Column(DateTime, default=_now)
 
     def to_dict(self) -> dict:
         return {
@@ -234,7 +325,7 @@ class Material(Base):
             "pages": self.pages,
             "text_preview": self.text_preview,
             "project_id": self.project_id,
-            "_source": "seed" if self.id.startswith("seed_") else "user",
+            "_source": "seed" if (self.id or "").startswith("seed_") else "user",
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
 
@@ -243,8 +334,9 @@ class Question(Base):
     """AI 生成题目。"""
     __tablename__ = "questions"
 
-    id = Column(Text, primary_key=True)
-    batch_id = Column(Text, nullable=False, index=True)
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(Integer, nullable=True, default=1)
+    batch_id = Column(Text, nullable=True, index=True)
     course = Column(Text, default="")
     question = Column(Text, nullable=False)
     type = Column(Text, default="简答题")
@@ -259,16 +351,24 @@ class Question(Base):
     common_mistakes = Column(Text, default="")
     cognitive_level = Column(Text, default="")
     source = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=_now)
 
     def to_dict(self) -> dict:
+        def _json_parse(val):
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    return []
+            return val or []
+
         return {
             "id": self.id,
             "batch_id": self.batch_id,
             "course": self.course,
             "question": self.question,
             "type": self.type,
-            "options": json.loads(self.options) if self.options else [],
+            "options": _json_parse(self.options),
             "answer": self.answer,
             "difficulty": self.difficulty,
             "knowledge_point": self.knowledge_point,
@@ -291,13 +391,14 @@ class InsightReport(Base):
     """学情分析报告。"""
     __tablename__ = "insight_reports"
 
-    id = Column(Text, primary_key=True)
-    student_id = Column(Text, nullable=False, index=True)
-    course_name = Column(Text, nullable=False)
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(Integer, nullable=True, default=1)
+    student_id = Column(Text, nullable=True, default="", index=True)
+    course_name = Column(Text, nullable=True, default="")
     report_type = Column(Text, default="individual")
     report_json = Column(Text, nullable=False)
-    project_id = Column(Text, default="ta-project", index=True)  # 数据来源项目
-    created_at = Column(DateTime, default=datetime.now)
+    project_id = Column(Text, default="ta-project", index=True)
+    created_at = Column(DateTime, default=_now)
 
     def to_dict(self) -> dict:
         return {
@@ -305,9 +406,9 @@ class InsightReport(Base):
             "student_id": self.student_id,
             "course_name": self.course_name,
             "report_type": self.report_type,
-            "report": json.loads(self.report_json) if self.report_json else {},
+            "report": json.loads(self.report_json) if isinstance(self.report_json, str) else self.report_json,
             "project_id": self.project_id,
-            "_source": "seed" if self.id.startswith("seed_") else "user",
+            "_source": "seed" if (self.id or "").startswith("seed_") else "user",
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
 
@@ -320,13 +421,14 @@ class TeachingAux(Base):
     """教学辅助素材（重难点/课堂素材/课件优化等）。"""
     __tablename__ = "teaching_aux"
 
-    id = Column(Text, primary_key=True)
-    course = Column(Text, nullable=False, index=True)
-    chapter = Column(Text, nullable=False)
-    aux_type = Column(Text, nullable=False)  # difficulty | classroom | ppt | variant
-    content_json = Column(Text, nullable=False)
-    project_id = Column(Text, default="ta-project", index=True)  # 数据来源项目
-    created_at = Column(DateTime, default=datetime.now)
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(Integer, nullable=True, default=1)
+    course = Column(Text, nullable=True, default="", index=True)
+    chapter = Column(Text, nullable=True, default="")
+    aux_type = Column(Text, nullable=True, default="")
+    content_json = Column(Text, nullable=True, default="{}")
+    project_id = Column(Text, default="ta-project", index=True)
+    created_at = Column(DateTime, default=_now)
 
     def to_dict(self) -> dict:
         return {
@@ -334,7 +436,7 @@ class TeachingAux(Base):
             "course": self.course,
             "chapter": self.chapter,
             "aux_type": self.aux_type,
-            "content": json.loads(self.content_json) if self.content_json else {},
+            "content": json.loads(self.content_json) if isinstance(self.content_json, str) else self.content_json,
             "project_id": self.project_id,
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
@@ -349,6 +451,7 @@ class LLMCallLog(Base):
     __tablename__ = "llm_call_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=True, default=1)
     model = Column(String(100), default="")
     function_name = Column(String(100), default="")
     prompt_tokens = Column(Integer, default=0)
@@ -357,7 +460,7 @@ class LLMCallLog(Base):
     latency_ms = Column(Integer, default=0)
     success = Column(Integer, default=1)
     error_message = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=_now)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -370,21 +473,28 @@ class AuditLog(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     plan_id = Column(Text, nullable=False, index=True)
-    plan_name = Column(Text, default="")  # 冗余存储，方便查询
+    plan_name = Column(Text, default="")
     course_name = Column(Text, default="")
     chapter = Column(Text, default="")
     operation = Column(Text, nullable=False)  # create / view / edit / export / delete / restore
-    operator = Column(Text, default="系统")  # 操作人
-    operator_role = Column(Text, default="教师")  # 教师 / 管理员
-    session_index = Column(Integer, nullable=True)  # 修改的具体流程索引（null=全教案操作）
-    changes_before = Column(Text, default="")  # 修改前快照（JSON）
-    changes_after = Column(Text, default="")  # 修改后快照（JSON）
-    detail = Column(Text, default="")  # 操作描述
+    operator = Column(Text, default="系统")
+    operator_role = Column(Text, default="教师")
+    session_index = Column(Integer, nullable=True)
+    changes_before = Column(Text, default="")
+    changes_after = Column(Text, default="")
+    detail = Column(Text, default="")
     ip_address = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.now, index=True)
+    created_at = Column(DateTime, default=_now, index=True)
 
     def to_dict(self) -> dict:
-        import json as _json
+        def _parse(val):
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    return {}
+            return val or {}
+
         return {
             "id": self.id,
             "plan_id": self.plan_id,
@@ -395,8 +505,8 @@ class AuditLog(Base):
             "operator": self.operator,
             "operator_role": self.operator_role,
             "session_index": self.session_index,
-            "changes_before": _json.loads(self.changes_before) if self.changes_before else {},
-            "changes_after": _json.loads(self.changes_after) if self.changes_after else {},
+            "changes_before": _parse(self.changes_before),
+            "changes_after": _parse(self.changes_after),
             "detail": self.detail,
             "ip_address": self.ip_address,
             "created_at": self.created_at.isoformat() if self.created_at else "",
@@ -410,17 +520,16 @@ class PlanSnapshot(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     plan_id = Column(Text, nullable=False, index=True)
     version = Column(Integer, default=1)
-    plan_data = Column(Text, nullable=False)  # 完整教案 JSON
+    plan_data = Column(Text, nullable=False)
     created_by = Column(Text, default="系统")
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=_now)
 
     def to_dict(self) -> dict:
-        import json as _json
         return {
             "id": self.id,
             "plan_id": self.plan_id,
             "version": self.version,
-            "plan_data": _json.loads(self.plan_data) if self.plan_data else {},
+            "plan_data": json.loads(self.plan_data) if isinstance(self.plan_data, str) else self.plan_data,
             "created_by": self.created_by,
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
@@ -434,23 +543,32 @@ class AgentWorkflow(Base):
     """Agent 编排工作流记录。"""
     __tablename__ = "agent_workflows"
 
-    id = Column(Text, primary_key=True)
+    id = Column(String(36), primary_key=True, default=_uuid)
+    user_id = Column(Integer, nullable=True, default=1)
     type = Column(Text, nullable=False, index=True)
     status = Column(Text, default="pending", index=True)
     input_params = Column(Text, default="{}")
     steps = Column(Text, default="[]")
-    final_output = Column(Text, default="{}")
-    created_at = Column(DateTime, default=datetime.now)
+    final_output = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_now)
     completed_at = Column(DateTime, nullable=True)
 
     def to_dict(self) -> dict:
+        def _parse(val):
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    return {}
+            return val or {}
+
         return {
             "id": self.id,
             "type": self.type,
             "status": self.status,
-            "input_params": json.loads(self.input_params) if self.input_params else {},
-            "steps": json.loads(self.steps) if self.steps else [],
-            "final_output": json.loads(self.final_output) if self.final_output else {},
+            "input_params": _parse(self.input_params),
+            "steps": _parse(self.steps),
+            "final_output": _parse(self.final_output),
             "created_at": self.created_at.isoformat() if self.created_at else "",
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }
@@ -465,10 +583,10 @@ class ProjectRegistry(Base):
     __tablename__ = "project_registry"
 
     id = Column(Text, primary_key=True)             # "ta-project" / "student-project"
-    name = Column(Text, nullable=False)              # "助教系统" / "助学系统"
+    name = Column(Text, nullable=False)
     token_hash = Column(Text, nullable=False)        # SHA256(project_token)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=_now)
 
     def to_dict(self) -> dict:
         return {

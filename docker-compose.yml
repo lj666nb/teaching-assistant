@@ -4,38 +4,19 @@
 # 访问 http://localhost:8080
 #
 # 无需预配置 API Key，启动后访问 http://localhost:8080 在网页中配置
-# 如需通过 .env 设置默认值：cp backend/.env.example .env 并编辑
+# 如需通过 .env 设置默认值：cp backend/.env.example backend/.env 并编辑
 #
 # 停止：
 #   docker-compose down
 #
 # 停止并删除数据卷：
 #   docker-compose down -v
+#
+# 数据库：使用云端 PostgreSQL（与项目11共用 tiaozhanbei）
+#   Host: 113.45.66.152:5432
+#   Database: tiaozhanbei
 
 services:
-  # ── 数据库 (PostgreSQL) ────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    container_name: edu-ta-postgres
-    restart: unless-stopped
-    environment:
-      - TZ=Asia/Shanghai
-      - POSTGRES_DB=edu_ta
-      - POSTGRES_USER=edu_admin
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-edu_ta_pass_2024}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U edu_admin -d edu_ta"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    networks:
-      - edu-ta-network
-
   # ── 后端服务 (FastAPI) ──────────────────────────────────
   backend:
     build:
@@ -49,8 +30,8 @@ services:
       - TZ=Asia/Shanghai
       # 数据目录（映射到持久化卷 edu-ta-data）
       - DATA_DIR=/app/data
-      # 数据库（默认连接同 compose 内的 PostgreSQL）
-      - DATABASE_URL=postgresql+psycopg2://edu_admin:${DB_PASSWORD:-edu_ta_pass_2024}@postgres:5432/edu_ta
+      # 数据库 — 云端 PostgreSQL（与项目11共用 tiaozhanbei）
+      - DATABASE_URL=postgresql+psycopg2://app_user:${DB_PASSWORD:-123456}@113.45.66.152:5432/tiaozhanbei
       # LLM 配置（通过 .env 文件传入，也可在浏览器 UI 中配置）
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
@@ -69,9 +50,6 @@ services:
       - edu-ta-materials:/app/knowledge_base/materials
     ports:
       - "127.0.0.1:8002:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
       interval: 30s
@@ -104,8 +82,6 @@ networks:
     driver: bridge
 
 volumes:
-  pgdata:
-    name: edu-ta-pgdata
   edu-ta-vector-store:
     name: edu-ta-vector-store
   edu-ta-data:

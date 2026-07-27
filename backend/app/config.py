@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # ── 数据库（默认 PostgreSQL，也兼容 SQLite 本地开发） ──
-    database_url: str = "postgresql+psycopg2://edu_admin:changeme@localhost:5432/edu_ta"
+    # ── 数据库 — 云端 PostgreSQL（与项目11共用 tiaozhanbei） ──
+    database_url: str = "postgresql+psycopg2://app_user:123456@113.45.66.152:5432/tiaozhanbei"
 
     # ── 项目互通标识 ──
     project_id: str = "ta-project"          # 项目唯一标识（助教端 / 助学端）
