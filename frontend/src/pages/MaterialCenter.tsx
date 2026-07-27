@@ -308,7 +308,7 @@ const MaterialCenter: React.FC = () => {
     finally { setPublishing(false); }
   };
 
-  // AI 已出题 = 全部题目（草稿 + 已发布），生成后立即显示
+  // AI 已出题 = 全部AI生成的题目（发布/撤销不改变数量，仅生成时增加、资料删除时减少）
   const totalQuestions = allQuestions.length;
   const courseCount = new Set(displayMaterials.map(m => m.course)).size;
 

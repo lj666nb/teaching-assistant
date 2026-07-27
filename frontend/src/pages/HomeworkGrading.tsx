@@ -1300,6 +1300,28 @@ th{background:#f0f5ff}
     finally { setSavingToBank(false); }
   };
 
+  // ── 出题助手：保存并直接发布（像资料题库AI出题一样出完即可发布） ──
+  const handleSaveAndPublish = async () => {
+    if (exercises.length === 0) { message.warning('没有可发布的题目'); return; }
+    setSavingToBank(true);
+    try {
+      const course = exerciseForm.getFieldValue('course_name') || '未分类';
+      const chapter = exerciseForm.getFieldValue('chapter') || '';
+      const res = await materialApi.saveExercises(course, chapter, exercises);
+      if (res.data.success) {
+        const questions = res.data.data.questions || [];
+        setSavedQuestions(questions);
+        setExercises([]);
+        setPublishExTitle(`${course} · ${chapter || '练习题'}`);
+        setPublishExDeadline('');
+        setPublishExModalOpen(true);
+        message.success(res.data.message || `已保存 ${questions.length} 道题目，请确认发布`);
+        loadPublishedExercises();
+      } else message.error(res.data.message || '保存失败');
+    } catch (e: any) { message.error(e.response?.data?.detail || '保存失败'); }
+    finally { setSavingToBank(false); }
+  };
+
   const handlePublishExercises = async () => {
     const ids = selectedExIds.length > 0 ? selectedExIds : savedQuestions.map(q => q.id);
     if (ids.length === 0) { message.warning('请先保存题目到题库'); return; }
@@ -1576,6 +1598,10 @@ th{background:#f0f5ff}
                             type="primary" style={{ borderRadius: 6, border: 'none', background: BRAND.colors.primaryGradient }}>
                             保存至题库
                           </Button>
+                          <Button icon={<SendOutlined />} size="small" onClick={handleSaveAndPublish} loading={savingToBank}
+                            style={{ borderRadius: 6, border: 'none', background: `linear-gradient(135deg, ${BRAND.colors.purple}, ${BRAND.colors.primary})`, color: '#fff' }}>
+                            发布
+                          </Button>
                         </Space>
                       }
                     >
@@ -1711,6 +1737,8 @@ th{background:#f0f5ff}
                         )}
                       </Space>
                     </div>
+                    {/* 答题卡提示 */}
+                    <Alert message="提交的文件是只有题号和答案的答题卡" type="info" showIcon style={{ borderRadius: 8, marginBottom: 12, fontSize: 11 }} />
                     {/* 自定义拖拽上传区域，用 label 包裹确保浏览器不拦截 click */}
                     <label style={{ display: 'block', cursor: 'pointer' }}>
                       <input
