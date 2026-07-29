@@ -26,6 +26,42 @@ const STORAGE_KEY = 'edu_ta_providers_v2';
 const ACTIVE_KEY = 'edu_ta_active_provider';
 const OLD_STORAGE_KEY = 'edu_ta_providers';
 
+// ════════════════════════════════════════════════════════
+// 账号隔离：每个账号独立存储 API 密钥
+// ════════════════════════════════════════════════════════
+
+let currentUsername: string = '';
+
+/** 设置当前登录用户（登录后调用） */
+export function setCurrentUser(username: string): void {
+  currentUsername = username;
+}
+
+/** 清除当前用户（退出登录时调用） */
+export function clearCurrentUser(): void {
+  currentUsername = '';
+}
+
+/** 获取当前登录用户名 */
+export function getCurrentUser(): string {
+  return currentUsername;
+}
+
+/** 生成带用户隔离的 localStorage 键名 */
+function scopedKey(baseKey: string): string {
+  return currentUsername ? `${baseKey}_${currentUsername}` : baseKey;
+}
+
+/** 获取当前用户的 scoped STORAGE_KEY */
+function getStorageKey(): string {
+  return scopedKey(STORAGE_KEY);
+}
+
+/** 获取当前用户的 scoped ACTIVE_KEY */
+function getActiveKey(): string {
+  return scopedKey(ACTIVE_KEY);
+}
+
 /** 生成简短唯一 ID */
 export function genId(): string {
   return Math.random().toString(36).substring(2, 10);
@@ -38,9 +74,8 @@ function migrateOldConfig(): void {
     if (!oldData) return;
     const oldProviders = JSON.parse(oldData);
     if (!Array.isArray(oldProviders) || oldProviders.length === 0) return;
-    // 检查是否已有新版数据
-    const newData = localStorage.getItem(STORAGE_KEY);
-    if (newData) return; // 已迁移过
+    // 检查是否已有新版数据（已迁移过）
+    if (localStorage.getItem(getStorageKey())) return;
 
     const migrated: ProviderWithModels[] = oldProviders.map((old: any) => ({
       id: old.id || genId(),
@@ -55,23 +90,41 @@ function migrateOldConfig(): void {
         test_status: 'untested' as const,
       }],
     }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-    // 迁移激活ID
-    const oldActive = localStorage.getItem(OLD_STORAGE_KEY + '_active');
-    if (oldActive) {
-      // 旧 active 存的是 provider id，直接复用
-    }
+    localStorage.setItem(getStorageKey(), JSON.stringify(migrated));
     localStorage.removeItem(OLD_STORAGE_KEY);
   } catch {
     // 迁移失败忽略
   }
 }
 
+/**
+ * 首次登录时：若旧版全局存储有数据，自动迁移到当前用户账号下。
+ * 每个账号的 API 密钥完全独立，互不可见。
+ */
+function migrateGlobalToScoped(): void {
+  if (!currentUsername) return;
+  const scopedData = localStorage.getItem(getStorageKey());
+  if (scopedData) return; // 当前账号已有配置，跳过
+
+  // 尝试从未作用域化的旧版全局 key 迁移
+  const globalData = localStorage.getItem(STORAGE_KEY);
+  if (globalData) {
+    localStorage.setItem(getStorageKey(), globalData);
+    // 同时迁移激活 ID
+    const globalActive = localStorage.getItem(ACTIVE_KEY);
+    if (globalActive) localStorage.setItem(getActiveKey(), globalActive);
+    // 删除全局旧数据，避免后续用户误用
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(ACTIVE_KEY);
+  }
+}
+
 /** 获取所有供应商 */
 export function getProviders(): ProviderWithModels[] {
   migrateOldConfig();
+  migrateGlobalToScoped();
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return JSON.parse(localStorage.getItem(getStorageKey()) || '[]');
   } catch {
     return [];
   }
@@ -83,22 +136,22 @@ export function saveProvider(p: ProviderWithModels): void {
   const idx = providers.findIndex(x => x.id === p.id);
   if (idx >= 0) providers[idx] = p;
   else providers.push(p);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(providers));
+  localStorage.setItem(getStorageKey(), JSON.stringify(providers));
 }
 
 /** 删除供应商 */
 export function deleteProvider(id: string): void {
   const providers = getProviders().filter(p => p.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(providers));
-  if (getActiveProviderId() === id) localStorage.removeItem(ACTIVE_KEY);
+  localStorage.setItem(getStorageKey(), JSON.stringify(providers));
+  if (getActiveProviderId() === id) localStorage.removeItem(getActiveKey());
 }
 
 export function getActiveProviderId(): string | null {
-  return localStorage.getItem(ACTIVE_KEY);
+  return localStorage.getItem(getActiveKey());
 }
 
 export function setActiveProviderId(id: string): void {
-  localStorage.setItem(ACTIVE_KEY, id);
+  localStorage.setItem(getActiveKey(), id);
 }
 
 /** 获取当前激活供应商的默认模型 */
@@ -113,8 +166,8 @@ export function getActiveModel(): { provider: ProviderWithModels; model: ModelIt
 }
 
 export function clearAll(): void {
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(ACTIVE_KEY);
+  localStorage.removeItem(getStorageKey());
+  localStorage.removeItem(getActiveKey());
 }
 
 // ════════════════════════════════════════════════════════

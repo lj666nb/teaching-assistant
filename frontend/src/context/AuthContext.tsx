@@ -6,6 +6,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { setCurrentUser, clearCurrentUser } from '../utils/providerStorage';
 
 interface AuthState {
   isLoggedIn: boolean;
@@ -57,6 +58,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (data.username) {
           setIsLoggedIn(true);
           setUsername(data.username);
+          setCurrentUser(data.username); // 恢复 API 密钥隔离
         }
       } catch {
         localStorage.removeItem(STORAGE_KEY_AUTH);
@@ -72,6 +74,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (inputUser === DEFAULT_ADMIN.username && inputPwd === DEFAULT_ADMIN.password) {
       setIsLoggedIn(true);
       setUsername(inputUser);
+      setCurrentUser(inputUser); // 切换 API 密钥到该账号
       localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify({ username: inputUser, loginTime: Date.now() }));
       return { success: true, message: '登录成功' };
     }
@@ -82,6 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (user && user.password === inputPwd) {
       setIsLoggedIn(true);
       setUsername(inputUser);
+      setCurrentUser(inputUser); // 切换 API 密钥到该账号
       localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify({ username: inputUser, loginTime: Date.now() }));
       return { success: true, message: '登录成功' };
     }
@@ -120,6 +124,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = useCallback(() => {
     setIsLoggedIn(false);
     setUsername('');
+    clearCurrentUser(); // 清除 API 密钥隔离，保护隐私
     localStorage.removeItem(STORAGE_KEY_AUTH);
   }, []);
 
