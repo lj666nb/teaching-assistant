@@ -74,7 +74,7 @@ def _ensure_columns(db_table, columns: dict[str, str]):
                 _log.warning(f"迁移跳过 {db_table}.{col_name}: {e}")
 
 
-def _uuid() -> str:
+def _gen_uuid() -> str:
     """生成 UUID 字符串，兼容所有数据库。"""
     return str(_uuid.uuid4())
 
@@ -177,7 +177,7 @@ class LessonPlan(Base):
     """教案（完整生成结果持久化）。"""
     __tablename__ = "lesson_plans"
 
-    id = Column(String(36), primary_key=True, default=_uuid)
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
     user_id = Column(Integer, nullable=True, default=1)
     course_name = Column(Text, nullable=False, index=True)
     chapter = Column(Text, nullable=True, default="")
@@ -209,7 +209,7 @@ class HomeworkGrade(Base):
     """作业批改结果。"""
     __tablename__ = "homework_grades"
 
-    id = Column(String(36), primary_key=True, default=_uuid)
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
     user_id = Column(Integer, nullable=True, default=1)
     student_name = Column(Text, nullable=True, default="")
     course_name = Column(Text, nullable=False, index=True)
@@ -271,7 +271,7 @@ class ExerciseBatch(Base):
     """出题批次（一次生成的一组题目）。"""
     __tablename__ = "exercise_batches"
 
-    id = Column(String(36), primary_key=True, default=_uuid)
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
     user_id = Column(Integer, nullable=True, default=1)
     course_name = Column(Text, nullable=False, index=True)
     chapter = Column(Text, default="")
@@ -300,7 +300,7 @@ class Material(Base):
     """教学资料（上传的文件元数据）。"""
     __tablename__ = "materials"
 
-    id = Column(String(36), primary_key=True, default=_uuid)
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
     user_id = Column(Integer, nullable=True, default=1)
     filename = Column(Text, nullable=False)
     course = Column(Text, default="未分类", index=True)
@@ -334,7 +334,7 @@ class Question(Base):
     """AI 生成题目。"""
     __tablename__ = "questions"
 
-    id = Column(String(36), primary_key=True, default=_uuid)
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
     user_id = Column(Integer, nullable=True, default=1)
     batch_id = Column(Text, nullable=True, index=True)
     course = Column(Text, default="")
@@ -391,7 +391,7 @@ class InsightReport(Base):
     """学情分析报告。"""
     __tablename__ = "insight_reports"
 
-    id = Column(String(36), primary_key=True, default=_uuid)
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
     user_id = Column(Integer, nullable=True, default=1)
     student_id = Column(Text, nullable=True, default="", index=True)
     course_name = Column(Text, nullable=True, default="")
@@ -421,7 +421,7 @@ class TeachingAux(Base):
     """教学辅助素材（重难点/课堂素材/课件优化等）。"""
     __tablename__ = "teaching_aux"
 
-    id = Column(String(36), primary_key=True, default=_uuid)
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
     user_id = Column(Integer, nullable=True, default=1)
     course = Column(Text, nullable=True, default="", index=True)
     chapter = Column(Text, nullable=True, default="")
@@ -543,7 +543,7 @@ class AgentWorkflow(Base):
     """Agent 编排工作流记录。"""
     __tablename__ = "agent_workflows"
 
-    id = Column(String(36), primary_key=True, default=_uuid)
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
     user_id = Column(Integer, nullable=True, default=1)
     type = Column(Text, nullable=False, index=True)
     status = Column(Text, default="pending", index=True)
@@ -594,6 +594,146 @@ class ProjectRegistry(Base):
             "name": self.name,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else "",
+        }
+
+
+# ═══════════════════════════════════════════════════════════
+# 10. 师生通信 — 消息系统
+# ═══════════════════════════════════════════════════════════
+
+class MessageConversation(Base):
+    """师生会话 — 学生与教师之间的一次对话。"""
+    __tablename__ = "message_conversations"
+
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
+    title = Column(Text, default="新对话")
+    student_name = Column(Text, nullable=False, index=True)
+    teacher_name = Column(Text, nullable=False, index=True)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "student_name": self.student_name,
+            "teacher_name": self.teacher_name,
+            "created_at": self.created_at.isoformat() if self.created_at else "",
+            "updated_at": self.updated_at.isoformat() if self.updated_at else "",
+        }
+
+
+class MessageRecord(Base):
+    """会话中的单条消息。"""
+    __tablename__ = "message_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String(36), nullable=False, index=True)
+    sender_name = Column(Text, nullable=False)
+    sender_role = Column(Text, nullable=False)  # 'student' | 'teacher'
+    content = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_now)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "conversation_id": self.conversation_id,
+            "sender_name": self.sender_name,
+            "sender_role": self.sender_role,
+            "content": self.content,
+            "is_read": self.is_read,
+            "created_at": self.created_at.isoformat() if self.created_at else "",
+        }
+
+
+# ═══════════════════════════════════════════════════════════
+# 11. 作业发布与提交
+# ═══════════════════════════════════════════════════════════
+
+class HomeworkAssignment(Base):
+    """教师发布的作业任务。"""
+    __tablename__ = "homework_assignments"
+
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
+    course_id = Column(Text, default="", index=True)
+    course_name = Column(Text, nullable=False)
+    teacher_name = Column(Text, nullable=False, index=True)
+    title = Column(Text, nullable=False)
+    content = Column(Text, default="")
+    deadline = Column(DateTime, nullable=True)
+    selected_students = Column(Text, default="[]")  # JSON 学生列表
+    attachments = Column(Text, default="[]")         # JSON 附件URL列表
+    question_ids = Column(Text, default="[]")        # JSON 题库题目ID
+    status = Column(Text, default="published")       # draft/published/closed
+    submission_count = Column(Integer, default=0)
+    graded_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    def to_dict(self) -> dict:
+        def _parse(val):
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    return []
+            return val or []
+        return {
+            "id": self.id,
+            "course_id": self.course_id,
+            "course_name": self.course_name,
+            "teacher_name": self.teacher_name,
+            "title": self.title,
+            "content": self.content,
+            "deadline": self.deadline.isoformat() if self.deadline else "",
+            "selected_students": _parse(self.selected_students),
+            "attachments": _parse(self.attachments),
+            "question_ids": _parse(self.question_ids),
+            "status": self.status,
+            "submission_count": self.submission_count,
+            "graded_count": self.graded_count,
+            "created_at": self.created_at.isoformat() if self.created_at else "",
+            "updated_at": self.updated_at.isoformat() if self.updated_at else "",
+        }
+
+
+class HomeworkSubmission(Base):
+    """学生提交的作业。"""
+    __tablename__ = "homework_submissions"
+
+    id = Column(String(36), primary_key=True, default=_gen_uuid)
+    assignment_id = Column(String(36), nullable=False, index=True)
+    student_name = Column(Text, nullable=False)
+    content = Column(Text, default="")
+    files = Column(Text, default="[]")       # JSON 附件URL
+    score = Column(Float, default=0)
+    feedback = Column(Text, default="")
+    graded_by = Column(Text, default="")
+    status = Column(Text, default="pending")  # pending/submitted/graded
+    submitted_at = Column(DateTime, nullable=True)
+    graded_at = Column(DateTime, nullable=True)
+
+    def to_dict(self) -> dict:
+        def _parse(val):
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    return []
+            return val or []
+        return {
+            "id": self.id,
+            "assignment_id": self.assignment_id,
+            "student_name": self.student_name,
+            "content": self.content,
+            "files": _parse(self.files),
+            "score": self.score,
+            "feedback": self.feedback,
+            "graded_by": self.graded_by,
+            "status": self.status,
+            "submitted_at": self.submitted_at.isoformat() if self.submitted_at else "",
+            "graded_at": self.graded_at.isoformat() if self.graded_at else "",
         }
 
 

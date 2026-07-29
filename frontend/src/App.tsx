@@ -33,6 +33,8 @@ import {
   KeyOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
+  MessageOutlined,
+  FormOutlined,
 } from '@ant-design/icons';
 import { BRAND } from './utils/brand';
 import './styles/brand.css';
@@ -53,6 +55,8 @@ import ResourceCenter from './pages/ResourceCenter';
 import LlmSetting from './pages/LlmSetting';
 import MaterialCenter from './pages/MaterialCenter';
 import AgentWorkflow from './pages/AgentWorkflow';
+import MessagingCenter from './pages/MessagingCenter';
+import AssignmentPublish from './pages/AssignmentPublish';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -62,6 +66,7 @@ const SIDEBAR_COLLAPSED = 64;
 
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: '智能工作台' },
+  { key: '/assignments', icon: <FormOutlined />, label: '布置作业' },
   { key: '/homework', icon: <FileSearchOutlined />, label: '作业智能辅批' },
   { key: '/materials', icon: <FileTextOutlined />, label: '资料与题库' },
   { key: '/resources', icon: <FolderOutlined />, label: '资源中心' },
@@ -69,6 +74,7 @@ const menuItems = [
   { key: '/courses', icon: <ReadOutlined />, label: '课程管理' },
   { key: '/lesson', icon: <DatabaseOutlined />, label: '教学台账中心' },
   { key: '/agent', icon: <RobotOutlined />, label: 'Agent 编排工作台' },
+  { key: '/messaging', icon: <MessageOutlined />, label: '师生通信' },
   { key: '/notifications', icon: <NotificationOutlined />, label: '消息通知' },
   { key: '/llm-setting', icon: <KeyOutlined />, label: 'LLM API 配置' },
 ];
@@ -281,6 +287,7 @@ const MainLayoutInner: React.FC = () => {
 
           <Routes key={routeKey}>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/assignments" element={<AssignmentPublish />} />
             <Route path="/homework" element={<HomeworkGrading />} />
             <Route path="/insight" element={<StudentInsight />} />
             <Route path="/materials" element={<MaterialCenter />} />
@@ -290,6 +297,7 @@ const MainLayoutInner: React.FC = () => {
             <Route path="/resources" element={<ResourceCenter />} />
             <Route path="/llm-setting" element={<LlmSetting />} />
             <Route path="/agent" element={<AgentWorkflow />} />
+            <Route path="/messaging" element={<MessagingCenter />} />
           </Routes>
         </Content>
       </Layout>

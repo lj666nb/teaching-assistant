@@ -301,6 +301,7 @@ async def create_course(data: CourseCreate):
         "id": course_id,
         "name": data.name.strip(),
         "code": new_code or f"AI{course_id}",
+        "class_code": "",  # 班级编号（学生用此加入）
         "teacher": data.teacher.strip(),
         "semester": data.semester,
         "category": data.category,
@@ -386,10 +387,14 @@ async def update_course(course_id: str, data: CourseUpdate):
 async def delete_course(course_id: str):
     """删除课程。"""
     courses = _read_json(COURSES_FILE)
-    before = len(courses.get("list", []))
-    courses["list"] = [c for c in courses["list"] if c["id"] != course_id]
-    if len(courses["list"]) == before:
+    lst = courses.get("list", [])
+    if not lst:
         raise HTTPException(status_code=404, detail="课程不存在")
+    before = len(lst)
+    lst = [c for c in lst if c["id"] != course_id]
+    if len(lst) == before:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    courses["list"] = lst
     _write_json(COURSES_FILE, courses)
     return APIResponse(success=True, message="已删除")
 
@@ -701,3 +706,53 @@ async def remove_student(course_id: str, student_id: str):
             _write_json(COURSES_FILE, courses)
             return APIResponse(success=True, message="已移除学生", data=courses["list"][i])
     raise HTTPException(status_code=404, detail="课程不存在")
+
+
+# ── 班级编号 ────────────────────────────────────────
+
+@router.post("/courses/{course_id}/generate-code", response_model=APIResponse)
+async def generate_class_code(course_id: str):
+    """生成/重置班级编号（10位字母数字）。"""
+    import random, string
+    courses = _read_json(COURSES_FILE)
+    for i, c in enumerate(courses.get("list", [])):
+        if c["id"] == course_id:
+            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
+            courses["list"][i]["class_code"] = code
+            courses["list"][i]["updated_at"] = datetime.now().isoformat()[:19]
+            _write_json(COURSES_FILE, courses)
+            return APIResponse(success=True, message=f"班级编号已生成", data={"class_code": code})
+    raise HTTPException(status_code=404, detail="课程不存在")
+
+
+@router.post("/join-by-code", response_model=APIResponse)
+async def join_by_code(data: dict):
+    """学生通过班级编号加入课程。"""
+    class_code = data.get("code", "").strip().upper()
+    if not class_code:
+        raise HTTPException(status_code=400, detail="请输入班级编号")
+
+    student_name = data.get("student_name", "").strip()
+    if not student_name:
+        raise HTTPException(status_code=400, detail="请输入姓名")
+
+    courses = _read_json(COURSES_FILE)
+    for i, c in enumerate(courses.get("list", [])):
+        if c.get("class_code", "").upper() == class_code:
+            slist = c.get("student_list", [])
+            if any(s.get("name") == student_name for s in slist):
+                return APIResponse(success=True, message=f"你已在「{c['name']}」中", data=c)
+            slist.append({
+                "id": str(uuid.uuid4())[:8],
+                "name": student_name,
+                "student_id": "",
+                "class": "",
+                "progress": 0,
+                "attendance": 0,
+            })
+            courses["list"][i]["student_list"] = slist
+            courses["list"][i]["students"] = len(slist)
+            courses["list"][i]["updated_at"] = datetime.now().isoformat()[:19]
+            _write_json(COURSES_FILE, courses)
+            return APIResponse(success=True, message=f"成功加入「{c['name']}」！", data=c)
+    raise HTTPException(status_code=404, detail="班级编号无效，请检查后重试")

@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import agent, audit, course_mgmt, grades, homework, knowledge, lesson_plan, materials, notifications, resources, settings as settings_api, student_insight, teaching
+from app.api import agent, assignments, audit, course_mgmt, grades, homework, knowledge, lesson_plan, materials, messaging, notifications, resources, settings as settings_api, student_insight, teaching
 
 # ── 应用信息 ────────────────────────────────────────────────
 APP_TITLE = "学科助教系统 Edu-TA"
@@ -79,10 +79,14 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",        # Vite 开发服务器
+        "http://localhost:5173",        # Vite 开发服务器（教师端）
+        "http://localhost:5174",        # Vite 开发服务器（学生端）
+        "http://localhost:5175",        # 备用（学生端）
         "http://localhost:3000",        # 备用
         "http://localhost:8080",        # Docker Nginx
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8080",
     ],
@@ -125,6 +129,12 @@ app.include_router(grades.router)
 app.include_router(audit.router)
 app.include_router(notifications.router)
 app.include_router(agent.router)
+
+# ── 师生通信（学生端 - 教师端互通） ──
+app.include_router(messaging.router)
+
+# ── 作业管理（布置/提交/批改） ──
+app.include_router(assignments.router)
 
 
 # ── 健康检查 ──────────────────────────────────────────────

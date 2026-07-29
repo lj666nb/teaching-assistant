@@ -17,7 +17,7 @@ import {
   FileTextOutlined, CheckCircleOutlined, TeamOutlined, ClockCircleOutlined,
   ArrowUpOutlined, ArrowDownOutlined, WarningOutlined, BarChartOutlined,
   BookOutlined, MessageOutlined, RobotOutlined, ThunderboltOutlined,
-  EyeOutlined, EyeInvisibleOutlined, DatabaseOutlined,
+  EyeOutlined, EyeInvisibleOutlined, DatabaseOutlined, FormOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { gradeApi, knowledgeApi } from '../api/client';
@@ -159,22 +159,6 @@ const Dashboard: React.FC = () => {
     return '晚上好';
   };
 
-  // ── 快捷功能（带品牌分色） ──
-  const quickActions = [
-    {
-      key: '/homework', title: '作业批改', desc: 'AI 智能批改，一键完成',
-      icon: <FileTextOutlined />, gradient: 'linear-gradient(135deg, #0F52BA, #1A6BE0)',
-    },
-    {
-      key: '/insight', title: '学情分析', desc: '多维度数据洞察',
-      icon: <BarChartOutlined />, gradient: 'linear-gradient(135deg, #36D399, #5EE8B0)',
-    },
-    {
-      key: '/lesson', title: '教学台账', desc: '数据沉淀可追溯',
-      icon: <BookOutlined />, gradient: 'linear-gradient(135deg, #FF9F43, #FFB976)',
-    },
-  ];
-
   // ── 数据隐藏模式：所有数值归零（global context） ──
 
   // ── 班级成绩（来自 API，按平均分降序） ──
@@ -191,6 +175,27 @@ const Dashboard: React.FC = () => {
   const totalGrades = visible ? totalGradesRaw : userStats.total;
   const kbDocs = visible ? (kbStatus?.total_documents || 0) : 0;
   const kbChunks = visible ? (kbStatus?.total_chunks || 0) : 0;
+
+  // ── 快捷功能（带品牌分色） ──
+  const quickActions = [
+    {
+      key: '/assignments', title: '快速布置作业', desc: '一键下发班级作业',
+      icon: <FormOutlined />, gradient: 'linear-gradient(135deg, #7B61FF, #A78BFA)',
+    },
+    {
+      key: '/homework', title: '待批改作业', desc: 'AI 智能批改，一键完成',
+      icon: <FileTextOutlined />, gradient: 'linear-gradient(135deg, #0F52BA, #1A6BE0)',
+      badge: pendingReview,
+    },
+    {
+      key: '/insight', title: '学情分析', desc: '多维度数据洞察',
+      icon: <BarChartOutlined />, gradient: 'linear-gradient(135deg, #36D399, #5EE8B0)',
+    },
+    {
+      key: '/lesson', title: '教学台账', desc: '数据沉淀可追溯',
+      icon: <BookOutlined />, gradient: 'linear-gradient(135deg, #FF9F43, #FFB976)',
+    },
+  ];
 
   // ── 近期待办（基于课程动态生成，隐藏模式下为空） ──
   interface PendingItem { title: string; submissions: number; deadline: string; urgent: boolean; }
@@ -541,7 +546,14 @@ const Dashboard: React.FC = () => {
                   <Space>
                     <Avatar icon={item.icon} style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: '#fff' }} />
                     <div>
-                      <Text strong style={{ fontSize: 13, color: '#fff' }}>{item.title}</Text>
+                      <Space size={4}>
+                        <Text strong style={{ fontSize: 13, color: '#fff' }}>{item.title}</Text>
+                        {(item as any).badge && (item as any).badge > 0 && (
+                          <Tag color="red" style={{ borderRadius: 10, fontSize: 10, margin: 0, lineHeight: '16px' }}>
+                            {(item as any).badge}
+                          </Tag>
+                        )}
+                      </Space>
                       <br />
                       <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)' }}>{item.desc}</Text>
                     </div>

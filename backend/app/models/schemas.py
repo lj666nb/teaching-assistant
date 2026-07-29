@@ -306,3 +306,101 @@ class ChatRequest(BaseModel):
     context: str = Field("", description="上下文（可选）")
     course: str = Field("", description="关联课程")
     use_rag: bool = Field(True, description="是否使用知识库增强")
+
+
+# ═══════════════════════════════════════════════════════════
+#  6. 师生通信 (Messaging)
+# ═══════════════════════════════════════════════════════════
+
+class CreateConversationRequest(BaseModel):
+    """创建会话请求。"""
+    title: str = Field("新对话", description="会话标题")
+    student_name: str = Field(..., description="学生名称")
+    teacher_name: str = Field(..., description="教师名称")
+
+
+class SendMessageRequest(BaseModel):
+    """发送消息请求。"""
+    conversation_id: str = Field(..., description="会话ID")
+    sender_name: str = Field(..., description="发送者名称")
+    sender_role: str = Field(..., description="发送者角色: student / teacher")
+    content: str = Field(..., min_length=1, max_length=10000, description="消息内容")
+
+
+class MessageResponse(BaseModel):
+    """消息条目。"""
+    id: int
+    conversation_id: str
+    sender_name: str
+    sender_role: str
+    content: str
+    is_read: bool
+    created_at: str
+
+
+class ConversationResponse(BaseModel):
+    """会话条目。"""
+    id: str
+    title: str
+    student_name: str
+    teacher_name: str
+    last_message: str = ""
+    unread_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+class ConversationListResponse(BaseModel):
+    """会话列表响应。"""
+    conversations: list[ConversationResponse]
+    total: int
+
+
+class MessageListResponse(BaseModel):
+    """消息列表响应。"""
+    messages: list[MessageResponse]
+    total: int
+
+
+class UnreadCountResponse(BaseModel):
+    """未读消息计数。"""
+    unread_count: int = 0
+
+
+# ═══════════════════════════════════════════════════════════
+#  7. 作业管理
+# ═══════════════════════════════════════════════════════════
+
+class AssignmentPublishRequest(BaseModel):
+    """发布作业请求。"""
+    course_id: str = ""
+    course_name: str = Field(..., description="课程名称")
+    teacher_name: str = Field(..., description="教师名称")
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = ""
+    deadline: str = ""
+    selected_students: list[str] = Field(default_factory=list)
+    attachments: list[str] = Field(default_factory=list)
+    question_ids: list[str] = Field(default_factory=list)
+
+
+class AssignmentUpdateRequest(BaseModel):
+    """更新作业请求。"""
+    title: str = Field("", max_length=200)
+    content: str = ""
+    deadline: str = ""
+    status: str = ""
+
+
+class SubmissionSubmitRequest(BaseModel):
+    """学生提交作业请求。"""
+    student_name: str = Field(..., description="学生名称")
+    content: str = ""
+    files: list[str] = Field(default_factory=list)
+
+
+class SubmissionGradeRequest(BaseModel):
+    """批改打分请求。"""
+    score: float = Field(0, ge=0, le=100)
+    feedback: str = ""
+    graded_by: str = ""

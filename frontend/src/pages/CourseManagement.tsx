@@ -17,12 +17,16 @@ import {
   ReadOutlined, TeamOutlined, ClockCircleOutlined, BookOutlined, EyeOutlined,
   PlusOutlined, DeleteOutlined, SearchOutlined, DownloadOutlined, EditOutlined,
   CheckCircleOutlined, ReloadOutlined, UserOutlined, HistoryOutlined,
-  DashboardOutlined, LinkOutlined, FileTextOutlined, BarChartOutlined,
+  DashboardOutlined, LinkOutlined, FileTextOutlined, BarChartOutlined, FormOutlined,
+  CopyOutlined, MessageOutlined,
 } from '@ant-design/icons';
 import { courseMgmtApi } from '../api/client';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { BRAND } from '../utils/brand';
 import dayjs from 'dayjs';
+import axios from 'axios';
+import { API_BASE_URL } from '../api/base';
 import './../styles/brand.css';
 import { useDataVisibility } from '../context/DataVisibilityContext';
 
@@ -41,6 +45,7 @@ const statusColorMap: Record<string, string> = {
 const CourseManagement: React.FC = () => {
   const { visible } = useDataVisibility();
   const { username } = useAuth();
+  const navigate = useNavigate();
   // ── 动态数据 ──
   const [enums, setEnums] = useState<any>({});
   const [teachers, setTeachers] = useState<any[]>([]);
@@ -77,6 +82,11 @@ const CourseManagement: React.FC = () => {
   const [manualSessions, setManualSessions] = useState(0);
   const [previewProgress, setPreviewProgress] = useState(0);
   const [sessionsError, setSessionsError] = useState('');
+
+  // 布置作业弹窗
+  const [hwModalOpen, setHwModalOpen] = useState(false);
+  const [hwCourse, setHwCourse] = useState<any>(null);
+  const [hwForm] = Form.useForm();
 
   // 删除确认
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
@@ -353,6 +363,58 @@ const CourseManagement: React.FC = () => {
     setConflictModalOpen(false);
   };
 
+  // 布置作业
+  const handleAssignHomework = (course: any) => {
+    setHwCourse(course);
+    hwForm.setFieldsValue({
+      course_name: course.name || '',
+      title: '',
+      content: '',
+      deadline: undefined,
+      selected_students: course.student_list || [],
+    });
+    setHwModalOpen(true);
+  };
+  const handleHwSubmit = async () => {
+    const vals = await hwForm.validateFields();
+    await axios.post(`${API_BASE_URL}/assignments`, {
+      ...vals,
+      teacher_name: username,
+      course_id: hwCourse?.id || '',
+      deadline: vals.deadline ? dayjs(vals.deadline).toISOString() : '',
+      selected_students: vals.selected_students || [],
+    });
+    message.success('作业已发布！');
+    setHwModalOpen(false);
+    hwForm.resetFields();
+  };
+
+  const generateCode = async (courseId: string) => {
+    try {
+      const res = await axios.post(`${API_BASE_URL}/course-mgmt/courses/${courseId}/generate-code`);
+      message.success(`班级编号: ${res.data.data.class_code}`);
+      loadEnums(); // refresh list
+    } catch { message.error('生成失败'); }
+  };
+
+  const startPrivateChat = async (studentName: string) => {
+    try {
+      const res = await axios.post(`${API_BASE_URL}/messaging/conversations`, {
+        title: `与 ${studentName} 的私聊`,
+        student_name: studentName,
+        teacher_name: username,
+      });
+      const conv = res.data?.data;
+      if (conv?.id) {
+        navigate(`/messaging?conv=${conv.id}`);
+      } else {
+        navigate('/messaging');
+      }
+    } catch {
+      navigate('/messaging');
+    }
+  };
+
   return (
     <div className="page-enter">
       {loading && <Spin style={{ position: 'fixed', top: '50%', left: '50%', zIndex: 9999 }} />}
@@ -430,6 +492,10 @@ const CourseManagement: React.FC = () => {
           columns={[
             { title: '课程名称', dataIndex: 'name', render: (v: string, r: any) => (<Space><Avatar size="small" style={{ backgroundColor: r.color || BRAND.colors.primary }}><BookOutlined /></Avatar><Text strong style={{ color: BRAND.colors.textPrimary }}>{v}</Text></Space>) },
             { title: '编号', dataIndex: 'code', width: 90 },
+            { title: '班级编号', dataIndex: 'class_code', width: 100, render: (v: string, r: any) => v ? (
+              <Space size={2}><Tag color="purple" style={{ borderRadius: 4, fontFamily: 'monospace' }}>{v}</Tag>
+              <Tooltip title="复制编号"><Button type="text" size="small" icon={<CopyOutlined />} onClick={() => { navigator.clipboard.writeText(v); message.success('已复制'); }} /></Tooltip></Space>) : (
+              <Button type="link" size="small" onClick={() => generateCode(r.id)} style={{ fontSize: 11 }}>生成编号</Button>) },
             { title: '教师', dataIndex: 'teacher', width: 90 },
             { title: '学生', dataIndex: 'students', width: 80, render: (_v: number, r: any) => <Tag style={{ borderRadius: 6 }}>{r.student_list?.length || r.students || 0} 人</Tag> },
             { title: '已授课时', dataIndex: 'sessions', width: 90, render: (v: number, r: any) => <Tag style={{ borderRadius: 6 }}>{v || 0}/{r.max_hours || thresholds.max_hours} 节</Tag> },
@@ -439,8 +505,10 @@ const CourseManagement: React.FC = () => {
               return <Progress percent={p} size="small" strokeColor={c} trailColor={BRAND.colors.border} style={{ width: 120 }} format={() => `${p}%`} />;
             }},
             { title: '状态', dataIndex: 'status', width: 90, render: (v: string) => statusTag(v) },
-            { title: '操作', width: 220, render: (_: any, r: any) => (
+            { title: '操作', width: 300, render: (_: any, r: any) => (
               <Space size={0}>
+                <Button type="link" size="small" icon={<FormOutlined />}
+                  style={{ color: BRAND.colors.primary, fontSize: 11 }} onClick={() => handleAssignHomework(r)}>布置作业</Button>
                 <Button type="link" size="small" icon={<EyeOutlined />} style={{ color: BRAND.colors.primary, fontSize: 11 }} onClick={() => { setSelectedCourse(r); setDrawerTab('basic'); setDrawerOpen(true); setStudentSearch(''); }}>详情</Button>
                 <Button type="link" size="small" icon={<EditOutlined />} style={{ fontSize: 11 }} onClick={() => handleEdit(r)}>编辑</Button>
                 <Button type="link" size="small" danger icon={<DeleteOutlined />} style={{ fontSize: 11 }}
@@ -746,8 +814,14 @@ const CourseManagement: React.FC = () => {
                             { title: '班级', dataIndex: 'class', width: 90 },
                             { title: '学习进度', dataIndex: 'progress', width: 120, render: (v: number) => <Progress percent={v || 0} size="small" format={() => `${v || 0}%`} /> },
                             { title: '出勤', dataIndex: 'attendance', width: 80, render: (v: number) => `${v || 0} 次` },
-                            { title: '操作', width: 80, render: (_: any, r: any) => (
-                              <Popconfirm title={`移除「${r.name}」？`} onConfirm={async () => {
+                            { title: '操作', width: 130, render: (_: any, r: any) => (
+                              <Space size={0}>
+                                <Tooltip title="私聊该学生">
+                                  <Button type="link" size="small" icon={<MessageOutlined />}
+                                    style={{ color: BRAND.colors.primary, fontSize: 11 }}
+                                    onClick={() => startPrivateChat(r.name)}>私聊</Button>
+                                </Tooltip>
+                                <Popconfirm title={`移除「${r.name}」？`} onConfirm={async () => {
                                 try {
                                   await courseMgmtApi.removeStudent(selectedCourse.id, r.id);
                                   message.success(`已移除「${r.name}」`);
@@ -759,6 +833,7 @@ const CourseManagement: React.FC = () => {
                               }}>
                                 <Button type="link" size="small" danger style={{ fontSize: 11 }}>移除</Button>
                               </Popconfirm>
+                              </Space>
                             )},
                           ]} />
                       </>
@@ -873,6 +948,29 @@ const CourseManagement: React.FC = () => {
             </Space>
           </div>
         )}
+      </Modal>
+
+      {/* 布置作业弹窗 */}
+      <Modal title={<Space><FormOutlined />布置作业 · {hwCourse?.name}</Space>}
+        open={hwModalOpen} onCancel={() => { setHwModalOpen(false); hwForm.resetFields(); }}
+        onOk={handleHwSubmit} okText="发布作业" width={560} destroyOnClose>
+        <Form form={hwForm} layout="vertical">
+          <Form.Item name="course_name" label="课程" rules={[{ required: true }]}>
+            <Input disabled style={{ borderRadius: 8 }} />
+          </Form.Item>
+          <Form.Item name="title" label="作业标题" rules={[{ required: true, message: '请输入标题' }]}>
+            <Input placeholder="KNN算法编程作业" style={{ borderRadius: 8 }} />
+          </Form.Item>
+          <Form.Item name="content" label="作业内容">
+            <Input.TextArea rows={4} placeholder="作业描述、要求..." style={{ borderRadius: 8 }} />
+          </Form.Item>
+          <Form.Item name="deadline" label="截止时间">
+            <DatePicker showTime style={{ width: '100%', borderRadius: 8 }} />
+          </Form.Item>
+          <Form.Item name="selected_students" label="下发学生（留空=全班）">
+            <Select mode="tags" style={{ borderRadius: 8 }} placeholder="输入学生名后回车" />
+          </Form.Item>
+        </Form>
       </Modal>
 
       <div className="brand-watermark">Edu-TA 课程管理 · 全动态后端驱动</div>
